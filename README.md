@@ -10,13 +10,6 @@ layout, then proved a byte-identical rebuild and published security evidence.
 solopen turns that workflow into a reusable toolkit and automates the mechanical
 link-order step plus the measured reconstruction loop.
 
-## First: do you even need to reconstruct?
-
-- **It's your program, or the team will cooperate** → don't reconstruct. Build
-  it reproducibly and publish a verified build (`solana-verify`, OtterSec's
-  registry). `solopen.py fetch` tells you if one already exists.
-- **Nobody will publish source** → that's what the loop below is for.
-
 ## The loop
 
 ```sh
@@ -383,25 +376,6 @@ static-review labels and the self-contained release verifier. `_test/test_bench.
 checks the ablation Rust parser. `_test/test_calibrate.py` checks panic-location parsing (with and without Rust 1.89's trailing NUL), stdlib lookups and aligned body search. `_test/test_pick_toolchain.py` checks release-date filtering, the source-coordinate check, the shortlist and that the canary stage only downloads the leader's neighbours. `_test/test_behaviour.py` checks transaction parsing, the behaviour comparison and lockfit's classification and version fitting. `_test/test_versions.py` pins the v2/v3 encodings, masking, static-syscall names, v3 pointer detection and loader-v4 capture. All 56 offline tests pass (one LiteSVM test runs only with `solders`); `_test/e2e_versions.py` is the per-version rebuild check above (needs platform-tools). **No end-to-end AI reconstruction of daos.fun or another real
 program has been measured yet**, so no success rate or claim that the AI loop
 finishes a real reconstruction is made.
-
-## What it can't do
-
-- **It's not automatic source recovery.** Disassembly is not Rust, and the AI
-  loop may stall, need human help, or fail to find any byte-identical source.
-- **Only what's on-chain.** No off-chain servers, bots, keys or frontend. No
-  original variable names or comments; those are gone from the binary.
-- **A match proves "this source builds these bytes"**, not that it's the
-  author's exact historical source (another lockfile or source could build
-  the same bytes; the daosfun repo says the same about itself).
-- **Upgradeable programs can change.** A rebuild is for the version captured at
-  a slot; `fetch` records the slot and who can upgrade.
-- **SBPF v0–v3.** v4 (SIMD-0177) and anything newer is refused. Early
-  platform-tools releases shipped `sbpfv3` targets with a different, pre-final
-  layout (v1.44's puts `.text` at 0); those builds can't be deployed and
-  calibrate rules them out by their header. C or assembly programs need their
-  own build step (linkorder/relink work on any SBF ELF).
-- Reference host is Linux x86-64.
-
 
 ## Files
 
