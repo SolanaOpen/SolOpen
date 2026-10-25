@@ -1,0 +1,24 @@
+[package]
+# The package name decides the lib name (my-program -> my_program) and so the
+# .so name, AND it is baked into symbol hashes. Use the original's if inspect
+# shows it (panic paths look like programs/<name>/src/...).
+name = "my_program"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "my_program"
+
+[features]
+default = []
+cpi = ["no-entrypoint"]
+no-entrypoint = []
+no-idl = []
+no-log-ix-name = []
+idl-build = ["anchor-lang/idl-build"]
+
+[dependencies]
+# Pin EXACT versions ("=x.y.z"). inspect's toolchain fingerprints and the
+# library paths in the binary narrow these down; the coverage score confirms.
+anchor-lang = "=0.30.1"

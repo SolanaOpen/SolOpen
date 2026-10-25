@@ -1,0 +1,7 @@
+__pycache__/
+*.py[cod]
+capture/
+reverse/
+runs/
+.solopen-tmp
+.env
