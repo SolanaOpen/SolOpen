@@ -103,7 +103,10 @@ nothing in your source shows it. `lockfit` reads the evidence the binary
 carries and checks `Cargo.lock` against it, without building anything:
 
 - **Exact.** Some releases leave a crate's registry path in panic messages
-  (`…/hashbrown-0.15.4/src/raw/mod.rs`): that is the crate and version.
+  (`…/borsh-1.5.7/src/ser/mod.rs`): that is the crate and version. The
+  standard library has crates.io dependencies of its own (`hashbrown` is
+  std's `HashMap`); a path the toolchain's sysroot carries is reported as
+  std's copy and never proposed as a `Cargo.lock` change.
 - **Coordinates.** Every other dependency panic location is `src/<file>.rs`
   with a line and column. For each locked crate it reads the published source
   (static.crates.io, checksum-verified, cached) and checks the code is there.
@@ -117,9 +120,12 @@ carries and checks `Cargo.lock` against it, without building anything:
 On daos.fun, with `num-bigint` set back to 0.4.3 and `rust_decimal` to
 1.33.1, it proposed `num-bigint` 0.4.6 (46/46 locations fit vs 17/46) and
 `rust_decimal` 1.34.0–1.36.0 (a tie, 62/62); `--apply` gave back a
-Cargo.lock identical to daosfun-source's. On pumpfun-source's Mayhem lockfile
-it finds `hashbrown` locked at 0.17.1 where the binary names 0.15.4, and
-lists the original's nine source files that sit at other paths there.
+Cargo.lock identical to daosfun-source's. On pumpfun-source's Mayhem it
+lists the original's nine source files (`programs/mayhem-program/src/…`)
+that sit at other paths there, recognises the binary's `hashbrown` 0.15.4 as
+the standard library's copy (so the original uses a std `HashMap` or
+`HashSet` somewhere), and finds two panic locations in a `src/account_wrapper.rs`
+that no locked crate has.
 
 ### SBPF versions
 

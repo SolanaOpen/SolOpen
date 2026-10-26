@@ -132,6 +132,27 @@ class LockfitTests(unittest.TestCase):
         self.assertEqual((p["crate"], p["locked"], p["proposed"]), ("num", "0.4.3", "0.4.6"))
         self.assertEqual(p["equally_good"], ["0.4.6", "0.4.7"])
 
+    def test_std_own_crates_are_not_lockfile_evidence(self):
+        # std's HashMap is hashbrown: a sysroot path names std's copy, not the program's Cargo.lock.
+        path = "/home/runner/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/{}/src/raw/mod.rs"
+        with tempfile.TemporaryDirectory() as td:
+            lib = Path(td) / "rustlib/sbpf-solana-solana/lib"
+            lib.mkdir(parents=True)
+            (lib / "libhashbrown-0123abcd.rlib").write_bytes(b"..." + path.format("hashbrown-0.15.4").encode())
+            lock = Path(td) / "Cargo.lock"
+            lock.write_text('version = 3\n[[package]]\nname = "hashbrown"\nversion = "0.17.1"\n'
+                            'source = "registry+https://github.com/rust-lang/crates.io-index"\nchecksum = "x"\n')
+            so = Path(td) / "program.so"
+            so.write_bytes(b"")
+            for version, want_std in (("0.15.4", "sysroot"), ("0.14.5", None)):
+                locs = {(path.format(f"hashbrown-{version}"), 99, 37, 40)}
+                with mock.patch.object(lockfit.C, "panic_locations", lambda raw: locs):
+                    rep = lockfit.analyze(so, None, lock, FakeStore({}), log=lambda m: None,
+                                          sysroots=[Path(td) / "rustlib"])
+                self.assertEqual(rep["exact"][0].get("std"), want_std)
+                self.assertEqual([p["proposed"] for p in rep["proposals"]], [] if want_std else [version])
+        self.assertIsNone(lockfit.sysroot_has("hashbrown", "0.15.4", roots=[]))
+
 
 if __name__ == "__main__":
     unittest.main()

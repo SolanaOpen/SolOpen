@@ -12,8 +12,11 @@ A wrong dependency version changes code everywhere that crate is used, and
 it is invisible in your source. The binary carries evidence for it:
 
   exact      a few releases leave a crate's registry path in panic messages
-             (`…/registry/src/…/hashbrown-0.15.4/src/raw/mod.rs`): that is
-             the crate and version, verbatim.
+             (`…/registry/src/…/borsh-1.5.7/src/ser/mod.rs`): that is the
+             crate and version, verbatim. The standard library has crates.io
+             dependencies of its own (hashbrown is std's HashMap), compiled
+             into the toolchain's sysroot; a path the sysroot carries is
+             std's copy and says nothing about Cargo.lock.
   coordinates  every other dependency panic location is `src/<file>.rs` with a
              line and column (Cargo builds registry crates from their own
              directory, and the remapped prefix is gone). For each crate in
@@ -44,6 +47,24 @@ INDEX = "https://index.crates.io/{path}"
 REGISTRY_PATH = re.compile(r"/registry/src/[^/]+/([A-Za-z0-9_-]+?)-(\d+\.\d+\.\d+[^/]*)/(.+)$")
 GIT_PATH = re.compile(r"/git/checkouts/([^/]+?)-[0-9a-f]{16}/([0-9a-f]{7,})/(.+)$")
 DISTINCT = 2                 # a file shipped by more crates than this says nothing about any one
+# crates.io crates the standard library itself is built with. Used only when no
+# platform-tools sysroot is cached to check against.
+STD_DEPS = {"hashbrown", "compiler_builtins", "rustc-demangle", "cfg-if", "libc", "adler", "adler2",
+            "miniz_oxide", "addr2line", "gimli", "object", "memchr", "dlmalloc", "unwinding", "r-efi",
+            "rustc-std-workspace-core", "rustc-std-workspace-alloc", "rustc-std-workspace-std"}
+
+
+def sysroot_has(name, version, roots=None):
+    """Does a platform-tools sysroot carry `name-version`? True or False when a
+    cached sysroot has that crate at all; None when none can tell."""
+    roots = sorted(CACHE.glob("platform-tools-v*/rust/lib/rustlib")) if roots is None else roots
+    needle, seen = f"/{name}-{version}/".encode(), False
+    for root in roots:
+        for rlib in Path(root).glob(f"*/lib/lib{name.replace('-', '_')}-*.rlib"):
+            seen = True
+            if needle in rlib.read_bytes():
+                return True
+    return False if seen else None
 
 
 # ---------------------------------------------------------------- crates
@@ -156,7 +177,7 @@ def fit_version(store, name, version, checksum, locs, memo):
     return sum(1 for f, line, col in locs if (t := read(root, f, memo)) is not None and plausible(t, line, col))
 
 
-def analyze(original, workspace, lock_path, store, max_versions=12, log=print):
+def analyze(original, workspace, lock_path, store, max_versions=12, log=print, sysroots=None):
     locs = C.panic_locations(Path(original).read_bytes())
     parts = classify(locs, workspace)
     pkgs = lock_packages(lock_path)
@@ -172,6 +193,10 @@ def analyze(original, workspace, lock_path, store, max_versions=12, log=print):
         locked = sorted(p["version"] for p in by_name.get(name, []))
         row = dict(crate=name, binary_version=version, locked=locked, file=rel, line=line, col=col)
         report["exact"].append(row)
+        in_std = sysroot_has(name, version, sysroots)
+        if in_std or (in_std is None and name in STD_DEPS):
+            row["std"] = "sysroot" if in_std else "probably (no sysroot cached to check)"
+            continue
         if version not in locked:
             report["proposals"].append(dict(crate=name, locked=locked[0] if len(locked) == 1 else None,
                                             proposed=version, evidence="exact registry path in the binary"))
@@ -347,6 +372,10 @@ def print_report(rep):
     print(f"panic locations: {rep['locations']} ({rep['std']} standard library, {rep['workspace']} your workspace, "
           f"{rep['dependency']} dependencies)")
     for e in rep["exact"]:
+        if e.get("std"):
+            print(f"  std    {e['crate']} {e['binary_version']}: the standard library's own copy, not a Cargo.lock "
+                  f"dependency ({e['std']}); the program uses it through std")
+            continue
         mark = "ok" if e["binary_version"] in e["locked"] else "MISMATCH"
         print(f"  exact  {e['crate']} {e['binary_version']} (lock: {', '.join(e['locked']) or 'absent'})  {mark}")
     for g in rep["git"][:5]:
