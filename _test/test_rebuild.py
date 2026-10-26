@@ -183,6 +183,16 @@ class RebuildTests(unittest.TestCase):
         self.assertEqual(rebuild.provenance_problems("entrypoint.rs", gate), [])
         self.assertTrue(rebuild.provenance_problems("lib.rs", "#![feature(asm_experimental_arch)]\n"))
 
+    def test_only_targets_with_source_here_are_workable(self):
+        with tempfile.TemporaryDirectory() as td:
+            ws = Path(td)
+            (ws / "src").mkdir()
+            (ws / "src/lib.rs").write_text("fn f() {}\n")
+            generic = {"source_file": None, "panic_sites_original": []}
+            mine = {"source_file": None, "panic_sites_original": ["src/lib.rs:3:9", "library/core/src/fmt/mod.rs:1:1"]}
+            self.assertEqual(rebuild.editable_files(ws, generic), [])
+            self.assertEqual(rebuild.editable_files(ws, mine), ["src/lib.rs"])
+
     def test_drops_temperature_when_the_model_refuses_it(self):
         seen = []
 

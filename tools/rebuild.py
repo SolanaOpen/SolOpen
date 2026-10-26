@@ -370,6 +370,17 @@ def site_lines(sites):
     return out
 
 
+def editable_files(workspace, target):
+    """Source files in the workspace this target can be fixed in: its own file, and
+    the files of the panic sites the original carries. Empty for library generics
+    (alloc::raw_vec::finish_grow, …) whose differences come from code elsewhere."""
+    import target as TG
+    ws = Path(workspace)
+    files = [target["source_file"]] if target.get("source_file") else []
+    files += [s.rsplit(":", 2)[0] for s in target.get("panic_sites_original", [])]
+    return [f for f in dict.fromkeys(files) if TG.inside(ws, f)]
+
+
 def make_prompt(args, target, diff_text, history, budget):
     ws = Path(args.workspace)
     orig_sites, my_sites = target["panic_sites_original"], target["panic_sites_yours"]
@@ -497,6 +508,9 @@ def main(argv=None):
     ap.add_argument("--max-failures", type=int, default=6, help="stop after this many endpoint errors in a row")
     ap.add_argument("--prompt-budget", type=int, default=90000, help="characters of diff + source per prompt")
     ap.add_argument("--focus", default=None, help="only work on targets whose name contains this text")
+    ap.add_argument("--include-unattributed", action="store_true",
+                    help="also prompt for targets with no source file in the workspace (library generics); "
+                         "the model gets no source to edit for those")
     ap.add_argument("--temperature", type=float, default=0.2)
     ap.add_argument("--max-tokens", type=int, default=16000)
     ap.add_argument("--timeout", type=int, default=300)
@@ -549,7 +563,8 @@ def main(argv=None):
         while attempt < args.max_iters and not best["identical"]:
             choices = [t for t in targets["targets"]
                        if (t["name"], t["original_offset"]) not in stuck
-                       and (not args.focus or args.focus in t["name"])]
+                       and (not args.focus or args.focus in t["name"])
+                       and (args.include_unattributed or editable_files(args.workspace, t))]
             if not choices:
                 if not targets["targets"]:
                     rel = read_json(Path(best["run_dir"]) / "relinked" / "relink-report.json", {})
