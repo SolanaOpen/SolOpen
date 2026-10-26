@@ -213,6 +213,10 @@ def api_key_for(base_url):
     return None
 
 
+class Declined(RuntimeError):
+    """The endpoint declined to answer this prompt (finish_reason content_filter)."""
+
+
 class AIClient:
     def __init__(self, base_url, model, api_key=None, timeout=300, max_tokens=16000, retries=4):
         self.url = base_url.rstrip("/")
@@ -264,6 +268,8 @@ class AIClient:
             raise RuntimeError("AI endpoint response has no choices[0].message.content") from exc
         if choice.get("finish_reason") == "length":
             raise RuntimeError("AI response was cut off at max_tokens; prefer 'replace' edits or raise --max-tokens")
+        if choice.get("finish_reason") == "content_filter":
+            raise Declined("the AI endpoint declined this prompt (finish_reason 'content_filter')")
         if not isinstance(content, str) or not content.strip():
             raise RuntimeError(f"AI endpoint returned no text (finish_reason {choice.get('finish_reason')!r})")
         return content
@@ -558,6 +564,7 @@ def main(argv=None):
 
     client = AIClient(args.base_url, args.model, api_key_for(args.base_url), args.timeout, args.max_tokens)
     per_target, stuck, failures, attempt = {}, set(), 0, 0
+    declined, declines_in_row = [], 0
     pending = None
     try:
         while attempt < args.max_iters and not best["identical"]:
@@ -587,11 +594,21 @@ def main(argv=None):
             try:
                 response = client.complete(prompt, temperature=args.temperature)
                 (args.out / f"response-{attempt:03d}.txt").write_text(response)
-                failures = 0                      # the endpoint answered; what follows is the model's fault
+                failures = declines_in_row = 0    # the endpoint answered; what follows is the model's fault
                 proposal = parse_response(response)
                 if not proposal["edits"]:
                     raise ValueError("no edits proposed")
                 pending = apply_edits(args.workspace, proposal["edits"], allow_manifests=args.allow_manifest_edits)
+            except Declined as exc:
+                print(f"   declined: {exc}; leaving this function as it is")
+                note(dict(entry, outcome="declined", error=str(exc)))
+                stuck.add(key)
+                declined.append(t["name"])
+                declines_in_row += 1
+                if declines_in_row >= args.max_failures:
+                    print(f"   the endpoint declined {declines_in_row} prompts in a row; stopping")
+                    break
+                continue
             except (RuntimeError, ValueError, TypeError, OSError) as exc:
                 bad_endpoint = isinstance(exc, RuntimeError)
                 failures = failures + 1 if bad_endpoint else 0
@@ -661,6 +678,8 @@ def main(argv=None):
         print("DONE — byte-identical from a clean build." if clean["identical"] else
               "WARNING: cached build matched but the clean build did not; see final-clean/")
         return 0 if clean["identical"] else 1
+    if declined:
+        print(f"\ndeclined by the endpoint and left as they are ({len(declined)}): " + ", ".join(declined))
     print(f"\nstopped: best coverage {best['coverage_pct']}%; history in {args.out / 'history.json'}")
     return 1
 

@@ -183,6 +183,27 @@ class RebuildTests(unittest.TestCase):
         self.assertEqual(rebuild.provenance_problems("entrypoint.rs", gate), [])
         self.assertTrue(rebuild.provenance_problems("lib.rs", "#![feature(asm_experimental_arch)]\n"))
 
+    def test_a_declined_prompt_is_its_own_error(self):
+        class Filtered(Handler):
+            def do_POST(self):
+                self.rfile.read(int(self.headers["Content-Length"]))
+                body = json.dumps({"choices": [{"finish_reason": "content_filter", "message": {"content": None}}]}).encode()
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+        server = HTTPServer(("127.0.0.1", 0), Filtered)
+        thread = threading.Thread(target=server.handle_request, daemon=True)
+        thread.start()
+        try:
+            client = rebuild.AIClient(f"http://127.0.0.1:{server.server_port}/v1", "test-model")
+            with self.assertRaises(rebuild.Declined):
+                client.complete("prompt")
+        finally:
+            thread.join(timeout=2)
+            server.server_close()
+
     def test_only_targets_with_source_here_are_workable(self):
         with tempfile.TemporaryDirectory() as td:
             ws = Path(td)
