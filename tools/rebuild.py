@@ -220,12 +220,14 @@ class AIClient:
             self.url += "/chat/completions"
         self.model, self.api_key, self.timeout = model, api_key, timeout
         self.max_tokens, self.retries = max_tokens, retries
+        self.send_temperature = True     # some models refuse the parameter; dropped once they say so
 
     def complete(self, prompt, system=SYSTEM, temperature=0.2):
-        body = json.dumps({
-            "model": self.model, "temperature": temperature, "max_tokens": self.max_tokens,
-            "messages": [{"role": "system", "content": system}, {"role": "user", "content": prompt}],
-        }).encode()
+        request = {"model": self.model, "max_tokens": self.max_tokens,
+                   "messages": [{"role": "system", "content": system}, {"role": "user", "content": prompt}]}
+        if temperature is not None and self.send_temperature:
+            request["temperature"] = temperature
+        body = json.dumps(request).encode()
         headers = {"Content-Type": "application/json", "User-Agent": "solopen-ai-rebuild/2"}
         if self.api_key:
             headers["Authorization"] = "Bearer " + self.api_key
@@ -239,6 +241,12 @@ class AIClient:
             except urllib.error.HTTPError as exc:
                 detail = exc.read(2000).decode("utf-8", "replace")
                 last = RuntimeError(f"AI endpoint returned HTTP {exc.code}: {detail}")
+                if exc.code == 400 and "temperature" in detail and "temperature" in request:
+                    # e.g. "`temperature` is deprecated for this model": retry without it, and stop sending it
+                    self.send_temperature = False
+                    del request["temperature"]
+                    body = json.dumps(request).encode()
+                    continue
                 if exc.code not in (408, 409, 429) and exc.code < 500:
                     raise last from exc
             except (urllib.error.URLError, OSError, http.client.HTTPException) as exc:

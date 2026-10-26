@@ -183,6 +183,34 @@ class RebuildTests(unittest.TestCase):
         self.assertEqual(rebuild.provenance_problems("entrypoint.rs", gate), [])
         self.assertTrue(rebuild.provenance_problems("lib.rs", "#![feature(asm_experimental_arch)]\n"))
 
+    def test_drops_temperature_when_the_model_refuses_it(self):
+        seen = []
+
+        class NoTemperature(Handler):
+            def do_POST(self):
+                request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+                seen.append("temperature" in request)
+                if "temperature" in request:
+                    status, body = 400, b'{"error":{"message":"`temperature` is deprecated for this model."}}'
+                else:
+                    status, body = 200, json.dumps({"choices": [{"message": {"content": '{"edits":[]}'}}]}).encode()
+                self.send_response(status)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+        server = HTTPServer(("127.0.0.1", 0), NoTemperature)
+        thread = threading.Thread(target=lambda: [server.handle_request() for _ in range(3)], daemon=True)
+        thread.start()
+        try:
+            client = rebuild.AIClient(f"http://127.0.0.1:{server.server_port}/v1", "test-model")
+            self.assertIn('"edits":[]', client.complete("prompt"))
+            self.assertIn('"edits":[]', client.complete("again"))   # remembered: no second refusal
+            self.assertEqual(seen, [True, False, False])
+        finally:
+            thread.join(timeout=2)
+            server.server_close()
+
     def test_openai_compatible_client(self):
         server = HTTPServer(("127.0.0.1", 0), Handler)
         thread = threading.Thread(target=server.handle_request, daemon=True)
